@@ -65,6 +65,9 @@ def parse_args():
   parser.add_argument('--image_dir', dest='image_dir',
                       help='directory to load images for demo',
                       default="images")
+  parser.add_argument('--target_dir', dest='target_dir',
+                      help='directory to load images for demo',
+                      default="images_det")
   parser.add_argument('--cuda', dest='cuda',
                       help='whether use CUDA',
                       action='store_true')
@@ -92,6 +95,9 @@ def parse_args():
   parser.add_argument('--vis', dest='vis',
                       help='visualization mode',
                       action='store_true')
+  parser.add_argument('--max_per_image', dest='max_per_image',
+                      help='max bounding boxes per image',
+                      default=100, type=int)
   parser.add_argument('--webcam_num', dest='webcam_num',
                       help='webcam ID number',
                       default=-1, type=int)
@@ -262,9 +268,9 @@ if __name__ == '__main__':
   fasterRCNN.eval()
 
   start = time.time()
-  max_per_image = 100
+  max_per_image = args.max_per_image
   thresh = 0.05
-  vis = True
+  vis = args.vis
 
   webcam_num = args.webcam_num
   # Set up webcam or get image directories
@@ -278,7 +284,7 @@ if __name__ == '__main__':
   print('Loaded Photo: {} images.'.format(num_images))
 
 
-  while (num_images >= 0):
+  while (num_images > 0):
       total_tic = time.time()
       if webcam_num == -1:
         num_images -= 1
@@ -322,12 +328,14 @@ if __name__ == '__main__':
       RCNN_loss_cls, RCNN_loss_bbox, \
       rois_label = fasterRCNN(im_data, im_info, gt_boxes, num_boxes)
 
-      scores = cls_prob.data
-      boxes = rois.data[:, :, 1:5]
+      scores = cls_prob.data[:, :max_per_image, :]
+      boxes = rois.data[:, :max_per_image, 1:5] # number of proposals after nms is 300, pre-nms is 6000 (see config.py), ranked by objectness score
+      print(rois.size(), cls_prob.size(), bbox_pred.size())
+      print(rois[:, 1:5, :])
 
       if cfg.TEST.BBOX_REG:
           # Apply bounding-box regression deltas
-          box_deltas = bbox_pred.data
+          box_deltas = bbox_pred[:, :max_per_image, :].data
           if cfg.TRAIN.BBOX_NORMALIZE_TARGETS_PRECOMPUTED:
           # Optionally normalize targets by a precomputed mean and stdev
             if args.class_agnostic:
@@ -369,6 +377,7 @@ if __name__ == '__main__':
             # cls_dets = torch.cat((cls_boxes, cls_scores), 1)
             cls_dets = cls_dets[order]
             keep = nms(cls_dets, cfg.TEST.NMS)
+            print('number of output boxes for class {}: {}'.format(pascal_classes[j], len(keep.view(-1).long())))
             cls_dets = cls_dets[keep.view(-1).long()]
             if vis:
               im2show = vis_detections(im2show, pascal_classes[j], cls_dets.cpu().numpy(), 0.5)
@@ -384,9 +393,10 @@ if __name__ == '__main__':
       if vis and webcam_num == -1:
           # cv2.imshow('test', im2show)
           # cv2.waitKey(0)
-          result_path = os.path.join(args.image_dir, imglist[num_images][:-4] + "_det.jpg")
+          result_path = os.path.join(args.target_dir, imglist[num_images][:-4] + "_det.jpg")
+          print('writing to files {}'.format(result_path))
           cv2.imwrite(result_path, im2show)
-      else:
+      elif vis and webcam_num > -1:
           im2showRGB = cv2.cvtColor(im2show, cv2.COLOR_BGR2RGB)
           cv2.imshow("frame", im2showRGB)
           total_toc = time.time()
