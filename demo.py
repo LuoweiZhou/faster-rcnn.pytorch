@@ -284,15 +284,13 @@ if __name__ == '__main__':
     num_images = 0
   else:
     imglist = os.listdir(args.image_dir)
-    num_images = len(imglist)
+    num_images = len(imglist)-1
 
-  print('Loaded Photo: {} images.'.format(num_images))
+  print('Loaded Photo: {} images.'.format(num_images+1))
 
 
-  while (num_images > 0):
+  while (num_images >= 0):
       total_tic = time.time()
-      if webcam_num == -1:
-        num_images -= 1
 
       # Get image from the webcam
       if webcam_num >= 0:
@@ -412,6 +410,10 @@ if __name__ == '__main__':
           print('Frame rate:', frame_rate)
           if cv2.waitKey(1) & 0xFF == ord('q'):
               break
+
+      if webcam_num == -1:
+        num_images -= 1
+
   if webcam_num >= 0:
       cap.release()
       cv2.destroyAllWindows()
