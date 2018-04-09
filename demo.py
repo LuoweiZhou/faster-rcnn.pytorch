@@ -101,6 +101,9 @@ def parse_args():
   parser.add_argument('--webcam_num', dest='webcam_num',
                       help='webcam ID number',
                       default=-1, type=int)
+  parser.add_argument('--ls', dest='large_scale',
+                      help='whether use large imag scale',
+                      action='store_true')
 
   args = parser.parse_args()
   return args
@@ -172,6 +175,8 @@ if __name__ == '__main__':
       args.imdb_name = "vg_150-50-50_minitrain"
       args.imdbval_name = "vg_150-50-50_minival"
       args.set_cfgs = ['ANCHOR_SCALES', '[4, 8, 16, 32]', 'ANCHOR_RATIOS', '[0.5,1,2]', 'MAX_NUM_GT_BOXES', '50']
+
+  args.cfg_file = "cfgs/{}_ls.yml".format(args.net) if args.large_scale else "cfgs/{}.yml".format(args.net)
 
   if args.cfg_file is not None:
     cfg_from_file(args.cfg_file)
@@ -330,7 +335,8 @@ if __name__ == '__main__':
 
       scores = cls_prob.data[:, :max_per_image, :]
       boxes = rois.data[:, :max_per_image, 1:5] # number of proposals after nms is 300, pre-nms is 6000 (see config.py), ranked by objectness score
-      print(rois.size(), cls_prob.size(), bbox_pred.size())
+
+      print(rois.size(), cls_prob.size(), bbox_pred.size()) # (1L, 300L, 5L) (1L, 300L, 81L) (1L, 300L, 324L)
       print(rois[:, 1:5, :])
 
       if cfg.TEST.BBOX_REG:
@@ -380,7 +386,8 @@ if __name__ == '__main__':
             print('number of output boxes for class {}: {}'.format(pascal_classes[j], len(keep.view(-1).long())))
             cls_dets = cls_dets[keep.view(-1).long()]
             if vis:
-              im2show = vis_detections(im2show, pascal_classes[j], cls_dets.cpu().numpy(), 0.5)
+              # box coordinate: x_tl, y_tl, x_br, y_br
+              im2show = vis_detections(im2show, pascal_classes[j], cls_dets.cpu().numpy(), 0.5) # the last arg. is vis threshold
 
       misc_toc = time.time()
       nms_time = misc_toc - misc_tic
