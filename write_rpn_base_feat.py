@@ -22,6 +22,8 @@ import torch.nn as nn
 import torch.optim as optim
 from collections import defaultdict
 import json
+import scipy.io
+from PIL import Image
 
 import torchvision.transforms as transforms
 import torchvision.datasets as dset
@@ -97,17 +99,15 @@ def parse_args():
   parser.add_argument('--vis', dest='vis',
                       help='visualization mode',
                       action='store_true')
-  parser.add_argument('--max_per_image', dest='max_per_image',
-                      help='max bounding boxes per image',
-                      default=100, type=int)
   parser.add_argument('--webcam_num', dest='webcam_num',
                       help='webcam ID number',
                       default=-1, type=int)
   parser.add_argument('--ls', dest='large_scale',
                       help='whether use large imag scale',
                       action='store_true')
-  parser.add_argument('--output_lst', default='/z/dat/yc2/segment_thumbnail_all_split_1fps/testing_box.txt')
-  parser.add_argument('--output_chunk', default='/z/dat/yc2/segment_thumbnail_all_split_1fps/testing_box.pth')
+  parser.add_argument('--output_chunk', default='/z/dat/yc2/segment_thumbnail_all_split_1fps/base_feat/testing_rpn_feat.pth', type=str)
+  parser.add_argument('--split', default='testing', type=str)
+  parser.add_argument('--rpn_proposal_root', default='/z/dat/yc2/segment_thumbnail_box_annotation_1fps', type=str)
 
   args = parser.parse_args()
   return args
@@ -150,6 +150,14 @@ def _get_image_blob(im):
 
   return blob, np.array(im_scale_factors)
 
+
+def pil_loader(path):
+    # open path as file to avoid ResourceWarning (https://github.com/python-pillow/Pillow/issues/835)
+    with open(path, 'rb') as f:
+        with Image.open(f) as img:
+            return img.convert('RGB')
+
+
 if __name__ == '__main__':
 
   args = parse_args()
@@ -188,7 +196,7 @@ if __name__ == '__main__':
     cfg_from_list(args.set_cfgs)
 
   # args inspection
-  assert(args.ls == True)
+  assert(args.large_scale == True)
 
   print('Using config:')
   pprint.pprint(cfg)
@@ -280,7 +288,6 @@ if __name__ == '__main__':
   fasterRCNN.eval()
 
   start = time.time()
-  max_per_image = args.max_per_image
   thresh = 0.05
   vis = args.vis
 
@@ -295,8 +302,40 @@ if __name__ == '__main__':
 
   print('Loaded Photo: {} images.'.format(num_images+1))
 
+  # load the 200 proposals
+  split = args.split
+  rpn_proposal_root = args.rpn_proposal_root
+  total_num_proposals = 200 # always load all the proposals we have
+
+  rpn_chunk = []
+
+  rpn_lst_file = os.path.join(rpn_proposal_root, split+'-box-'+str(total_num_proposals)+'-edgebox.txt')
+  rpn_chunk_file = os.path.join(rpn_proposal_root, split+'-box-'+str(total_num_proposals)+'-edgebox.mat')
+
+  with open(rpn_lst_file) as f:
+      rpn_lst = []
+      rpn_dict = {}
+      for j, r in enumerate(f):
+          ind = r.strip()
+          rpn_lst.append(ind[:15]+ind[15:-4].zfill(4)+'.jpg')
+          rpn_dict[ind] = j
+
+      print(len(imglist), len(rpn_lst))
+      print(set([x for x in rpn_lst if rpn_lst.count(x) > 1]))
+      print(len(set(imglist)), len(set(rpn_lst)))
+      print(set(rpn_lst).difference(set(imglist)))
+      print(set(imglist).difference(set(rpn_lst)))
+      assert(len(imglist) == len(rpn_lst))
+      imglist = rpn_lst[::-1]
+
+  rpn_chunk.append(torch.from_numpy(scipy.io.loadmat(rpn_chunk_file)['edge_box_data'].astype(np.float32)))
+
+  rpn_chunk = torch.cat(rpn_chunk).cpu()
+  rpn_chunk = rpn_chunk.permute(0,2,1)
+
   results = []
   while (num_images >= 0):
+      print(num_images)
       total_tic = time.time()
 
       # Get image from the webcam
@@ -333,39 +372,45 @@ if __name__ == '__main__':
       # pdb.set_trace()
       det_tic = time.time()
 
-      rois, cls_prob, bbox_pred, \
-      rpn_loss_cls, rpn_loss_box, \
-      RCNN_loss_cls, RCNN_loss_bbox, \
-      rois_label = fasterRCNN(im_data, im_info, gt_boxes, num_boxes)
+      # rois, cls_prob, bbox_pred, \
+      # rpn_loss_cls, rpn_loss_box, \
+      # RCNN_loss_cls, RCNN_loss_bbox, \
+      # rois_label, base_feat = fasterRCNN(im_data, im_info, gt_boxes, num_boxes)
 
-      scores = cls_prob.data[:, :max_per_image, :]
-      boxes = rois.data[:, :max_per_image, 1:5] # for resnet101_ls, number of proposals after nms is 1000, pre-nms is 6000 (see config.py), ranked by objectness score
+      base_feat = fasterRCNN.RCNN_base(im_data)
+      base_feat = base_feat.data
 
-      # print(rois.size(), cls_prob.size(), bbox_pred.size()) # (1L, 300L, 5L) (1L, 300L, 81L) (1L, 300L, 324L)
-      # print(rois[:, 1:5, :])
+      img_name = imglist[num_images]
+      prefix_name = img_name[:15]+str(int(img_name[15:19])).zfill(2)
+      img_name = prefix_name+'.jpg'
+      feat_name = prefix_name+'.pth'
 
-      # normalize coordinates to 0-1
-      # 800 is the scale (large scale coco)
-      assert boxes.size(0) == 1
-      width = 800.*max(1, im_in.shape[1]/im_in.shape[0])
-      height = 800.*max(1, im_in.shape[0]/im_in.shape[1])
+      original_w, original_h = pil_loader(os.path.join('/z/dat/yc2/segment_thumbnail_all_split_1fps', split, imglist[num_images])).size
 
-      boxes = boxes.squeeze(0)
-      boxes[:, 0] = (boxes[:, 0]+0.5)/width
-      boxes[:, 2] = (boxes[:, 2]+0.5)/width
-      boxes[:, 1] = (boxes[:, 1]+0.5)/height
-      boxes[:, 3] = (boxes[:, 3]+0.5)/height
+      _, C, H, W = base_feat.size()
+      box_w = 720
+      box_h = int(box_w*original_h/original_w)
 
-      results.append(boxes)
+      frm_rpn = rpn_chunk[rpn_dict[img_name]] # num_proposals x 4 (x_tl, y_tl, x_br, y_br)
+      num_proposals = frm_rpn.size(0)
+      frm_rpn = frm_rpn-0.5 # coordinates are 1-indexed from edgebox
 
-      print(torch.max(boxes), imglist[num_images], im_in.shape)
-      assert len(torch.nonzero(boxes>1).view(-1)) == 0
+      frm_rpn[:,0] = torch.floor(frm_rpn[:,0]/box_w*W-0.5)
+      frm_rpn[:,2] = torch.ceil(frm_rpn[:,2]/box_w*W-0.5)
+      frm_rpn[:,1] = torch.floor(frm_rpn[:,1]/box_h*H-0.5)
+      frm_rpn[:,3] = torch.ceil(frm_rpn[:,3]/box_h*H-0.5)
+      frm_rpn = frm_rpn.int()
+
+      rpn_feat = []
+      for i in range(num_proposals):
+          coord = frm_rpn[i]
+          print(coord, H, W)
+          rpn_feat.append(torch.mean(base_feat[0, :, max(coord[1],0):max(coord[3],1),
+                                     max(coord[0],0):max(coord[2],1)].contiguous().view(C, -1), dim=1))
+
+      results.append(torch.stack(rpn_feat, dim=1).cpu())
 
       if webcam_num == -1:
         num_images -= 1
-
-  # write proposals to file
-  with open(args.output_lst, 'w') as f:
-      f.write(', '.join(imglist[::-1]))
 
   torch.save(torch.stack(results), args.output_chunk)

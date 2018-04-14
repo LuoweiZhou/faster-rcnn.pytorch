@@ -332,10 +332,10 @@ if __name__ == '__main__':
       rois_label = fasterRCNN(im_data, im_info, gt_boxes, num_boxes)
 
       scores = cls_prob.data[:, :max_per_image, :]
-      boxes = rois.data[:, :max_per_image, 1:5] # number of proposals after nms is 300, pre-nms is 6000 (see config.py), ranked by objectness score
+      boxes = rois.data[:, :max_per_image, 1:5] # number of proposals after nms is 300, pre-nms is 6000 (see config.py), ranked by objectness score. for resnet101_ls, the post nms is 1000
 
-      print(rois.size(), cls_prob.size(), bbox_pred.size()) # (1L, 300L, 5L) (1L, 300L, 81L) (1L, 300L, 324L)
-      print(rois[:, 1:5, :])
+      # print(rois.size(), cls_prob.size(), bbox_pred.size()) # (1L, 300L, 5L) (1L, 300L, 81L) (1L, 300L, 324L)
+      # print(rois[:, 1:5, :])
 
       if cfg.TEST.BBOX_REG:
           # Apply bounding-box regression deltas
@@ -381,7 +381,7 @@ if __name__ == '__main__':
             # cls_dets = torch.cat((cls_boxes, cls_scores), 1)
             cls_dets = cls_dets[order]
             keep = nms(cls_dets, cfg.TEST.NMS)
-            print('number of output boxes for class {}: {}'.format(pascal_classes[j], len(keep.view(-1).long())))
+            # print('number of output boxes for class {}: {}'.format(pascal_classes[j], len(keep.view(-1).long())))
             cls_dets = cls_dets[keep.view(-1).long()]
             if vis:
               # box coordinate: x_tl, y_tl, x_br, y_br
