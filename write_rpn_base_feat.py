@@ -105,7 +105,7 @@ def parse_args():
   parser.add_argument('--ls', dest='large_scale',
                       help='whether use large imag scale',
                       action='store_true')
-  parser.add_argument('--output_chunk', default='/z/dat/yc2/segment_thumbnail_all_split_1fps/base_feat/testing_rpn_feat.pth', type=str)
+  parser.add_argument('--output_feat_root', default='/z/dat/yc2/segment_thumbnail_all_split_1fps/base_feat', type=str)
   parser.add_argument('--split', default='testing', type=str)
   parser.add_argument('--rpn_proposal_root', default='/z/dat/yc2/segment_thumbnail_box_annotation_1fps', type=str)
 
@@ -333,7 +333,7 @@ if __name__ == '__main__':
   rpn_chunk = torch.cat(rpn_chunk).cpu()
   rpn_chunk = rpn_chunk.permute(0,2,1)
 
-  results = []
+  # results = []
   while (num_images >= 0):
       print(num_images)
       total_tic = time.time()
@@ -404,13 +404,19 @@ if __name__ == '__main__':
       rpn_feat = []
       for i in range(num_proposals):
           coord = frm_rpn[i]
-          print(coord, H, W)
-          rpn_feat.append(torch.mean(base_feat[0, :, max(coord[1],0):max(coord[3],1),
+          try:
+              rpn_feat.append(torch.mean(base_feat[0, :, max(coord[1],0):max(coord[3],1),
                                      max(coord[0],0):max(coord[2],1)].contiguous().view(C, -1), dim=1))
+          except:
+              rpn_feat.append(torch.mean(base_feat[0].view(C, -1), dim=1))
+              print('size error!')
+              print(coord, H, W)
+              print(img_name)
 
-      results.append(torch.stack(rpn_feat, dim=1).cpu())
+      # results.append(torch.stack(rpn_feat, dim=1).cpu())
+      torch.save(torch.stack(rpn_feat, dim=1).cpu(), os.path.join(args.output_feat_root, args.split, feat_name))
 
       if webcam_num == -1:
         num_images -= 1
 
-  torch.save(torch.stack(results), args.output_chunk)
+  # torch.save(torch.stack(results), args.output_chunk)
