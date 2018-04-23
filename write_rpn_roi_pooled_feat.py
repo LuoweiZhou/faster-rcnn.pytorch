@@ -110,7 +110,7 @@ def parse_args():
                       action='store_true')
   parser.add_argument('--split', default='testing', type=str)
 
-  parser.add_argument('--output_root', default='/z/dat/yc2/segment_thumbnail_all_split_1fps/testing_box.txt')
+  parser.add_argument('--output_root', default='/z/dat/yc2/segment_thumbnail_all_split_1fps')
   parser.add_argument('--output_base_feat_root', default='/z/dat/yc2/segment_thumbnail_all_split_1fps/base_feat', type=str)
   parser.add_argument('--output_roi_feat_root', default='/z/dat/yc2/segment_thumbnail_all_split_1fps/roi_pooled_feat', type=str)
 
