@@ -329,7 +329,7 @@ if __name__ == '__main__':
       rois, cls_prob, bbox_pred, \
       rpn_loss_cls, rpn_loss_box, \
       RCNN_loss_cls, RCNN_loss_bbox, \
-      rois_label = fasterRCNN(im_data, im_info, gt_boxes, num_boxes)
+      rois_label, _ = fasterRCNN(im_data, im_info, gt_boxes, num_boxes)
 
       scores = cls_prob.data[:, :max_per_image, :]
       boxes = rois.data[:, :max_per_image, 1:5] # number of proposals after nms is 300, pre-nms is 6000 (see config.py), ranked by objectness score. for resnet101_ls, the post nms is 1000

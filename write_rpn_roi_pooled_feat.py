@@ -22,6 +22,8 @@ import torch.nn as nn
 import torch.optim as optim
 from collections import defaultdict
 import json
+import scipy.io
+from PIL import Image
 
 import torchvision.transforms as transforms
 import torchvision.datasets as dset
@@ -106,8 +108,12 @@ def parse_args():
   parser.add_argument('--ls', dest='large_scale',
                       help='whether use large imag scale',
                       action='store_true')
-  parser.add_argument('--output_lst', default='/z/dat/yc2/segment_thumbnail_all_split_1fps/testing_box.txt')
-  parser.add_argument('--output_chunk', default='/z/dat/yc2/segment_thumbnail_all_split_1fps/testing_box.pth')
+  parser.add_argument('--split', default='testing', type=str)
+
+  parser.add_argument('--output_root', default='/z/dat/yc2/segment_thumbnail_all_split_1fps/testing_box.txt')
+  parser.add_argument('--output_base_feat_root', default='/z/dat/yc2/segment_thumbnail_all_split_1fps/base_feat', type=str)
+  parser.add_argument('--output_roi_feat_root', default='/z/dat/yc2/segment_thumbnail_all_split_1fps/roi_pooled_feat', type=str)
+
 
   args = parser.parse_args()
   return args
@@ -150,6 +156,14 @@ def _get_image_blob(im):
 
   return blob, np.array(im_scale_factors)
 
+
+def pil_loader(path):
+    # open path as file to avoid ResourceWarning (https://github.com/python-pillow/Pillow/issues/835)
+    with open(path, 'rb') as f:
+        with Image.open(f) as img:
+            return img.convert('RGB')
+
+
 if __name__ == '__main__':
 
   args = parse_args()
@@ -188,7 +202,7 @@ if __name__ == '__main__':
     cfg_from_list(args.set_cfgs)
 
   # args inspection
-  assert(args.ls == True)
+  assert(args.large_scale == True)
 
   print('Using config:')
   pprint.pprint(cfg)
@@ -336,35 +350,55 @@ if __name__ == '__main__':
       rois, cls_prob, bbox_pred, \
       rpn_loss_cls, rpn_loss_box, \
       RCNN_loss_cls, RCNN_loss_bbox, \
-      rois_label = fasterRCNN(im_data, im_info, gt_boxes, num_boxes)
+      rois_label, base_feat, roi_pooled_feat = fasterRCNN(im_data, im_info, gt_boxes, num_boxes)
+      # size of base_feat: 1x1024xH'xW'
+      # size of roi pooled feat: 1000x2048
 
       boxes = rois.data[:, :max_per_image, 1:5] # for resnet101_ls, number of proposals after nms is 1000, pre-nms is 6000 (see config.py), ranked by objectness score
 
-      # print(rois.size(), cls_prob.size(), bbox_pred.size()) # (1L, 300L, 5L) (1L, 300L, 81L) (1L, 300L, 324L)
-      # print(rois[:, 1:5, :])
-
+      # Part I: roi proposals
       # normalize coordinates to 0-1
       # 800 is the scale (large scale coco)
+      # convert the coordinates to 720:-1, also 1-indexed to match the proposals from edgebox (based on MATLAB code)
       assert boxes.size(0) == 1
       width = 800.*max(1, im_in.shape[1]/im_in.shape[0])
       height = 800.*max(1, im_in.shape[0]/im_in.shape[1])
 
+      original_w, original_h = pil_loader(os.path.join('/z/dat/yc2/segment_thumbnail_all_split_1fps', \
+                                          args.split, imglist[num_images])).size
+      box_w = 720
+      box_h = int(box_w*original_h/original_w)
+
       boxes = boxes.squeeze(0)
-      boxes[:, 0] = (boxes[:, 0]+0.5)/width
-      boxes[:, 2] = (boxes[:, 2]+0.5)/width
-      boxes[:, 1] = (boxes[:, 1]+0.5)/height
-      boxes[:, 3] = (boxes[:, 3]+0.5)/height
+      boxes[:, 0] = (boxes[:, 0]+0.5)/width*box_w+0.5
+      boxes[:, 2] = (boxes[:, 2]+0.5)/width*box_w+0.5
+      boxes[:, 1] = (boxes[:, 1]+0.5)/height*box_h+0.5
+      boxes[:, 3] = (boxes[:, 3]+0.5)/height*box_h+0.5
+
+      print(torch.max(boxes), imglist[num_images], im_in.shape)
 
       results.append(boxes)
 
-      print(torch.max(boxes), imglist[num_images], im_in.shape)
-      assert len(torch.nonzero(boxes>1).view(-1)) == 0
+
+      # Part II: base feat for the entire image and roi pooled feature
+      img_name = imglist[num_images]
+      prefix_name = img_name[:-4]
+      feat_name = prefix_name+'.pth'
+
+      _, C, _, _ = base_feat.size()
+      pooled_base_feat = torch.mean(base_feat[0].view(C, -1), dim=1) # size is 1024
+      assert(pooled_base_feat.size(0) == 1024)
+      torch.save(pooled_base_feat.cpu(), os.path.join(args.output_base_feat_root, args.split, feat_name))
+
+      roi_pooled_feat = roi_pooled_feat[:max_per_image, :]
+      assert(roi_pooled_feat.size(1) == 2048)
+      torch.save(roi_pooled_feat.cpu(), os.path.join(args.output_roi_feat_root, args.split, feat_name))
 
       if webcam_num == -1:
         num_images -= 1
 
   # write proposals to file
-  with open(args.output_lst, 'w') as f:
+  with open(os.path.join(args.output_root, args.split+'-box-'+str(max_per_image)+'.txt'), 'w') as f:
       f.write(', '.join(imglist[::-1]))
 
-  torch.save(torch.stack(results), args.output_chunk)
+  torch.save(torch.stack(results), os.path.join(args.output_root, args.split+'-box-'+str(max_per_image)+'.pth'))
