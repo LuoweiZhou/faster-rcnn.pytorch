@@ -361,8 +361,6 @@ if __name__ == '__main__':
       # 800 is the scale (large scale coco)
       # convert the coordinates to 720:-1, also 1-indexed to match the proposals from edgebox (based on MATLAB code)
       assert boxes.size(0) == 1
-      width = 800.*max(1, im_in.shape[1]/im_in.shape[0])
-      height = 800.*max(1, im_in.shape[0]/im_in.shape[1])
 
       original_w, original_h = pil_loader(os.path.join('/z/dat/yc2/segment_thumbnail_all_split_1fps', \
                                           args.split, imglist[num_images])).size
@@ -370,10 +368,10 @@ if __name__ == '__main__':
       box_h = int(box_w*original_h/original_w)
 
       boxes = boxes.squeeze(0)
-      boxes[:, 0] = (boxes[:, 0]+0.5)/width*box_w+0.5
-      boxes[:, 2] = (boxes[:, 2]+0.5)/width*box_w+0.5
-      boxes[:, 1] = (boxes[:, 1]+0.5)/height*box_h+0.5
-      boxes[:, 3] = (boxes[:, 3]+0.5)/height*box_h+0.5
+      boxes[:, 0] = (boxes[:, 0]+0.5)/im_scales[0]/original_w*box_w+0.5
+      boxes[:, 2] = (boxes[:, 2]+0.5)/im_scales[0]/original_w*box_w+0.5
+      boxes[:, 1] = (boxes[:, 1]+0.5)/im_scales[0]/original_h*box_h+0.5
+      boxes[:, 3] = (boxes[:, 3]+0.5)/im_scales[0]/original_h*box_h+0.5
 
       print(torch.max(boxes), imglist[num_images], im_in.shape)
 
